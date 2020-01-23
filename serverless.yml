@@ -1,0 +1,81 @@
+# Welcome to Serverless!
+#
+# For full config options, check the docs:
+#    docs.serverless.com
+#
+
+service: aws-golang-bot
+
+frameworkVersion: '>=1.28.0 <2.0.0'
+
+provider:
+  name: aws
+  runtime: go1.x
+
+  stackName: ${self:service}-${self:provider.stage}
+  stage: ${opt:stage, 'dev'}
+  region: ${opt:region, 'eu-west-1'}
+
+  # Add statements to the Lambda function's IAM Role
+  iamRoleStatements:
+    - Effect: Allow
+      Action:
+        - dynamodb:GetItem
+        - dynamodb:PutItem
+        - dynamodb:Query
+        - dynamodb:Scan
+      Resource:
+        - Fn::GetAtt: [BotUsersTable, Arn]
+        - Fn::Join:
+            - '/'
+            - - Fn::GetAtt: [BotUsersTable, Arn]
+              - '*'
+
+  # Define service-wide environment variables
+  environment:
+    AWS_AG_API_ID:
+      Ref: ApiGatewayRestApi
+    AWS_AG_API_STAGE: ${self:provider.stage}
+    AWS_DB_TABLE:
+      Ref: BotUsersTable
+    OIDC_CONFIG_URL: ${file(.env.${self:provider.stage}.yml):OIDC_CONFIG_URL}
+    OIDC_CLIENT_ID: ${file(.env.${self:provider.stage}.yml):OIDC_CLIENT_ID}
+    OIDC_CLIENT_SECRET: ${file(.env.${self:provider.stage}.yml):OIDC_CLIENT_SECRET}
+    TG_BOT_TOKEN: ${file(.env.${self:provider.stage}.yml):TG_BOT_TOKEN}
+
+package:
+  exclude:
+    - ./**
+  include:
+    - ./bin/**
+
+functions:
+  auth-callback:
+    handler: bin/auth
+    environment:
+      POST_AUTH_REDIRECT: ${file(.env.${self:provider.stage}.yml):POST_AUTH_REDIRECT}
+    events:
+      - http:
+          path: auth/callback
+          method: get
+  telegram-webhook:
+    handler: bin/telegram
+    events:
+      - http:
+          path: telegram
+          method: post
+
+# Add CloudFormation resource templates
+resources:
+  Resources:
+    BotUsersTable:
+      Type: 'AWS::DynamoDB::Table'
+      Properties:
+        TableName: telegramBotUsers
+        AttributeDefinitions:
+          - AttributeName: TelegramUserID
+            AttributeType: N
+        KeySchema:
+          - AttributeName: TelegramUserID
+            KeyType: HASH
+        BillingMode: PAY_PER_REQUEST
